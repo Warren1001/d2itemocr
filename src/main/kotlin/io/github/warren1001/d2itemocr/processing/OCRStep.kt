@@ -6,8 +6,8 @@ interface OCRStep {
 	
 	fun stepNameDifferentiator(): String
 	
-	fun process(image: BufferedImage, visualize: Boolean): BufferedImage
-	
 	fun canVisualize(): Boolean
+	
+	fun process(image: BufferedImage, visualize: Boolean): BufferedImage
 	
 }

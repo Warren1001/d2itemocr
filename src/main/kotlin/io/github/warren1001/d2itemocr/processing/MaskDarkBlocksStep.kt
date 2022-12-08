@@ -6,7 +6,7 @@ import java.awt.image.BufferedImage
 
 class MaskDarkBlocksStep: OCRStep {
 	
-	private val blockSize = 3
+	private val blockSize = 5
 	
 	override fun stepNameDifferentiator() = "maskDarkBlocks"
 	

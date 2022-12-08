@@ -82,13 +82,13 @@ class CropHighestDarkDensityStep: OCRStep {
 			}
 		}
 		
-		minX -= blockSize
+		minX -= (blockSize / 2).toInt()
 		minX = minX.coerceAtLeast(0)
-		minY -= blockSize
+		minY -= (blockSize / 2).toInt()
 		minY = minY.coerceAtLeast(0)
-		maxX += blockSize
+		maxX += (blockSize / 2).toInt()
 		maxX = maxX.coerceAtMost(image.width - 1)
-		maxY += blockSize
+		maxY += (blockSize / 2).toInt()
 		maxY = maxY.coerceAtMost(image.height - 1)
 		var width = maxX - minX
 		var height = maxY - minY

@@ -4,6 +4,7 @@ import io.github.warren1001.d2itemocr.processing.*
 import io.github.warren1001.d2itemocr.util.ColorPoint
 import io.github.warren1001.d2itemocr.util.OCRStepResult
 import net.sourceforge.tess4j.ITessAPI
+import net.sourceforge.tess4j.ITessAPI.TessPageSegMode
 import net.sourceforge.tess4j.Tesseract
 import net.sourceforge.tess4j.TesseractException
 import java.awt.Color
@@ -12,19 +13,25 @@ import java.awt.image.ColorModel
 import java.awt.image.WritableRaster
 import java.io.File
 import java.util.*
-import java.util.concurrent.Executors
 import javax.imageio.ImageIO
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.system.exitProcess
 
 class D2ItemOCR {
 	
 	private val instance = Tesseract()
 	
-	// gold, white, blue, gray
-	private val textColors = mutableListOf(Color(255, 255, 255), Color(212, 196, 145), Color(136, 136, 255), Color(132, 132, 132))
+	// gold, white, blue, gray, red
+	private val textColors = mutableListOf(Color(255, 255, 255), Color(212, 196, 145), Color(136, 136, 255), Color(132, 132, 132), Color(255, 105, 105))
 	
-	private val ocrSteps = mutableListOf(
+	private val ocrSteps1 = mutableListOf(
+		CropWhiteDensityWithLinesStep(),
+		MaskDarkBlocksStep(),
+		CropHighestDarkDensityStep()
+	)
+	
+	private val ocrSteps2 = mutableListOf(
 		CropWhiteDensityWithLinesStep(),
 		MaskDarkBlocksStep(),
 		CropHighestDarkDensityStep(),
@@ -39,49 +46,61 @@ class D2ItemOCR {
 		
 		instance.setDatapath(File("tessdata").absolutePath)
 		instance.setLanguage("ExocetD2")
-		
-		var run = true
+		instance.setVariable("tessedit_char_whitelist", "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789%*()+-/,:' ")
+		instance.setOcrEngineMode(ITessAPI.TessOcrEngineMode.OEM_LSTM_ONLY)
+		instance.setPageSegMode(TessPageSegMode.PSM_SINGLE_BLOCK)
 		
 		File("images", "process").mkdirs()
 		
-		Executors.newSingleThreadExecutor().execute {
-			while (run) {
-				print("Input the image path to OCR: ")
-				val input = readLine()!!
-				if (input == "exit") {
-					run = false
-				} else {
-					val file = File("images", input)
-					if (!file.exists()) {
-						println("File '$input' does not exist, try again. Must be located in images/ folder.")
-					} else {
-						println()
-						println("Processing image...")
-						doOCR(file)
-					}
-				}
+		while (true) {
+			print("Input the image and mode to OCR: ")
+			val input = readLine()!!
+			if (input.startsWith("exit")) {
+				exitProcess(0)
+			}
+			val args = input.split(" ")
+			if (args.size != 2) {
+				println("You must provide the image file name and the mode (1 or 2): 'test.bmp 1'")
+				continue
+			}
+			val fileName = args[0]
+			val mode = args[1].toInt()
+			if (mode != 1 && mode != 2) {
+				println("Mode must be 1 or 2")
+				continue
+			}
+			val file = File("images", fileName)
+			if (!file.exists()) {
+				println("File '$fileName' does not exist, try again. Must be located in images/ folder.")
+			} else {
+				println()
+				println("Processing image...")
+				doOCR(file, mode)
 			}
 		}
 		
 	}
 	
-	fun doOCR(file: File) {
+	fun doOCR(file: File, mode: Int) {
 		
 		val name = file.nameWithoutExtension
 		var image = file.toImage()
+		val ocrSteps = if (mode == 1) ocrSteps1 else ocrSteps2
 		
 		var totalTimeTaken = 0L
+		
+		val path = "images/process/${name}/"
+		File(path).listFiles()?.forEach { it.delete() }
 		
 		for ((i, step) in ocrSteps.withIndex()) {
 			val result = executeOCRStep(image, step, true)
 			totalTimeTaken += result.timeTaken
 			image = result.image
-			image.saveToFile("images/process/${name}_${i}_${step.stepNameDifferentiator()}.png")
-			val visualOptional = result.visualizedImage
-			if (visualOptional.isPresent) {
-				visualOptional.get().saveToFile("images/process/${name}_${i}_${step.stepNameDifferentiator()}_visualized.png")
-			}
-			println("Step ${i + 1} of ${ocrSteps.size} (${step.stepNameDifferentiator()}) took ${result.timeTaken}ms")
+			image.saveToFile("$path${i}_${step.stepNameDifferentiator()}.png")
+			result.visualizedImage.ifPresent { it.saveToFile("images/process/${name}/${i}_v_${step.stepNameDifferentiator()}.png") }
+			val stepInfo = "Step ${i + 1}/${ocrSteps.size} - ${step.stepNameDifferentiator()}:"
+			val spaces = "\t".repeat(7 - stepInfo.length / 8)
+			println("$stepInfo$spaces${result.timeTaken} ms")
 		}
 		
 		try {
@@ -91,16 +110,23 @@ class D2ItemOCR {
 			val time = System.currentTimeMillis() - start
 			totalTimeTaken += time
 			
-			println("OCR took ${time}ms")
+			val stepInfo = "Step Final - OCR:"
+			val spaces = "\t".repeat(7 - stepInfo.length / 8)
+			
+			println("$stepInfo$spaces${time} ms")
 			println()
-			println(result.joinToString(separator = "\n", transform = { "${it.text}\t${(it.confidence * 10).roundToInt() / 10.0}% Confidence" }))
+			println("Total time taken: $totalTimeTaken ms")
+			println()
+			println(result.filter { it.confidence > 5 }.joinToString(separator = "\n", transform = {
+				val text = it.text.replace("\n", "")
+				val spacing = "\t".repeat(7 - text.length / 8)
+				"$text$spacing(${(it.confidence * 10).roundToInt() / 10.0}%)"
+			}))
 			
 		} catch (e: TesseractException) {
 			println(e.message)
 		}
 		
-		println()
-		println("Total time taken: $totalTimeTaken")
 		println()
 		println("----------------------------------------")
 		println()
@@ -188,7 +214,11 @@ fun BufferedImage.getColor(x: Int, y: Int) = Color(getRGB(x, y), true)
 
 fun BufferedImage.getColor(point: ColorPoint) = getColor(point.x, point.y)
 
-fun BufferedImage.saveToFile(fileName: String) = ImageIO.write(this, "png", File(fileName))
+fun BufferedImage.saveToFile(fileName: String): Boolean {
+	val file = File(fileName)
+	file.parentFile.mkdirs()
+	return ImageIO.write(this, "png", file)
+}
 
 fun BufferedImage.pad(length: Int) = this.pad(length, length, Color.BLACK)
 
